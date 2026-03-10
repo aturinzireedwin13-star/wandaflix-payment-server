@@ -9,53 +9,47 @@ const PORT = process.env.PORT || 3000;
 const CONSUMER_KEY = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
 const CONSUMER_SECRET = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
 
-// Request Pesapal Token
-async function getToken() {
+// ROOT TEST ROUTE
+app.get("/", (req, res) => {
+    res.send("Wandaflix Payment Server Running");
+});
 
-    const response = await fetch(
-        "https://cybqa.pesapal.com/pesapalv3/api/Auth/RequestToken",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify({
-                consumer_key: CONSUMER_KEY,
-                consumer_secret: CONSUMER_SECRET
-            })
-        }
-    );
-
-    const data = await response.json();
-    return data;
-}
-
-// Endpoint to get token
+// GET PESAPAL TOKEN
 app.get("/get-token", async (req, res) => {
 
     try {
 
-        const token = await getToken();
-        res.json(token);
+        const response = await fetch(
+            "https://cybqa.pesapal.com/pesapalv3/api/Auth/RequestToken",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                    consumer_key: CONSUMER_KEY,
+                    consumer_secret: CONSUMER_SECRET
+                })
+            }
+        );
+
+        const data = await response.json();
+
+        res.json(data);
 
     } catch (error) {
 
         console.error(error);
+
         res.status(500).json({
-            error: "Failed to request Pesapal token"
+            error: "Token request failed"
         });
 
     }
 
 });
 
-// Root test route
-app.get("/", (req, res) => {
-    res.send("Wandaflix Payment Server Running");
-});
-
-// Start server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

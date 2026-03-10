@@ -1,4 +1,3 @@
-
 {
   "name": "wandaflix-payment-server",
   "version": "1.0.0",
@@ -11,15 +10,4 @@
     "express": "^4.18.2",
     "node-fetch": "^2.6.7"
   }
-
-{
-  "name": "wandaflix-payment-server",
-  "version": "1.0.0",
-  "description": "Pesapal payment server for Wandaflix",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.7"}
+}

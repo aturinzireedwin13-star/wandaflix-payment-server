@@ -54,7 +54,7 @@ app.get("/get-token", async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-=======
+
 const express = require("express");
 const fetch = require("node-fetch");
 
@@ -110,4 +110,3 @@ app.get("/get-token", async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
->>>>>>> a785f6023daff7c46b231b219a584888dd7652b3

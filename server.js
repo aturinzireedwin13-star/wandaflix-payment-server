@@ -6,59 +6,68 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Your Pesapal keys
 const CONSUMER_KEY = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
 const CONSUMER_SECRET = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
+const IPN_ID = "af8de284-55a1-4e81-b00d-da86eb52bdf0";
 
-// Choose environment: "sandbox" or "production"
-const ENVIRONMENT = "sandbox"; // change to "production" if using live keys
+// ✅ FIXED URLs: V3 uses /api/... not /pesapalv3/api/...
+const BASE_URL = "https://pay.pesapal.com/v3/api"; 
 
-const PESAPAL_URL = ENVIRONMENT === "sandbox"
-  ? "https://cybqa.pesapal.com/pesapalv3/api/Auth/RequestToken"
-  : "https://www.pesapal.com/pesapalv3/api/Auth/RequestToken";
-
-// Root route
-app.get("/", (req, res) => {
-  res.send("Wandaflix Payment Server Running");
-});
-
-// Get Pesapal token
-app.get("/get-token", async (req, res) => {
-  try {
-    console.log("Requesting Pesapal token...");
-
-    // Trim keys to avoid accidental whitespace
-    const body = {
-      consumer_key: CONSUMER_KEY.trim(),
-      consumer_secret: CONSUMER_SECRET.trim()
-    };
-
-    const response = await fetch(PESAPAL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify(body)
+// 1️⃣ HELPER: GET AUTH TOKEN
+async function getAuthToken() {
+    const response = await fetch(`${BASE_URL}/Auth/RequestToken`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ consumer_key: CONSUMER_KEY, consumer_secret: CONSUMER_SECRET })
     });
-
     const data = await response.json();
+    return data.token;
+}
 
-    console.log("Pesapal response:", data);
+// 2️⃣ ROUTE: GENERATE PAYMENT LINK
+app.post("/pay", async (req, res) => {
+    try {
+        const token = await getAuthToken();
+        
+        const orderData = {
+            id: `WANDA-${Date.now()}`, // Unique ID for this transaction
+            currency: "UGX",
+            amount: req.body.amount || 1000,
+            description: "Wandaflix Access",
+            callback_url: "https://your-domain.com/callback", 
+            notification_id: IPN_ID,
+            billing_address: {
+                email_address: req.body.email || "customer@wandaflix.com",
+                first_name: "Wandaflix",
+                last_name: "User"
+            }
+        };
 
-    if (data.error) {
-      // Log and return Pesapal error
-      console.error("Pesapal API error:", data);
-      return res.status(500).json({ error: data });
+        const response = await fetch(`${BASE_URL}/Transactions/SubmitOrderRequest`, {
+            method: "POST",
+            headers: { 
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(orderData)
+        });
+
+        const result = await response.json();
+        res.json(result); // This sends the redirect_url to your app
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-
-    res.json(data);
-  } catch (error) {
-    console.error("Request failed:", error);
-    res.status(500).json({ error: "Token request failed", details: error.message });
-  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// 3️⃣ ROUTE: IPN HANDLER (The "Unlocker")
+app.get("/ipn", async (req, res) => {
+    const { OrderTrackingId, OrderMerchantReference } = req.query;
+    
+    // Here is where you check status and unlock the movie in Firebase
+    console.log(`Payment Notification received for ${OrderMerchantReference}`);
+    
+    // Pesapal status check logic would go here
+    res.json({ status: 200, message: "OK" });
 });
+
+app.listen(PORT, () => console.log(`Wandaflix API live on port ${PORT}`));

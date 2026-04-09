@@ -34,8 +34,8 @@ const consumer_key = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
 const consumer_secret = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
 const baseURL = "https://pay.pesapal.com/v3/api";
 
-// 🔔 REPLACE AFTER REGISTERING
-let IPN_ID = "REPLACE_AFTER_REGISTERING";
+// 🔔 YOUR REAL IPN ID (ALREADY SET ✅)
+const IPN_ID = "6608a16d-e037-401a-ab56-da8551e1e515";
 
 // 🔑 GET TOKEN
 async function getToken() {
@@ -49,34 +49,6 @@ async function getToken() {
 // 🏠 HOME
 app.get("/", (req, res) => {
   res.send("🚀 Wandaflix Payment Server Live");
-});
-
-
-// 🔔 REGISTER IPN (RUN THIS ONCE IN BROWSER)
-app.get("/register-ipn", async (req, res) => {
-  try {
-    const token = await getToken();
-
-    const response = await axios.post(
-      `${baseURL}/URLSetup/RegisterIPN`,
-      {
-        url: "https://wandaflix-payment-server.onrender.com/ipn",
-        ipn_notification_type: "GET",
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-    console.log("✅ IPN REGISTERED:", response.data);
-    res.json(response.data);
-
-  } catch (error) {
-    console.error("❌ IPN ERROR:", error.response?.data || error.message);
-    res.status(500).send("IPN registration failed");
-  }
 });
 
 
@@ -140,7 +112,7 @@ app.get("/pay", async (req, res) => {
 });
 
 
-// 🔔 IPN (MAIN LOGIC)
+// 🔔 IPN (FINAL WORKING VERSION)
 app.get("/ipn", async (req, res) => {
   console.log("🔥 IPN RECEIVED:", req.query);
 

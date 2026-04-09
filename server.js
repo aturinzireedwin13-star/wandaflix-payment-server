@@ -5,16 +5,16 @@ const admin = require("firebase-admin");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔐 FIREBASE SETUP (Render + Local)
+// 🔐 FIREBASE SETUP
 let serviceAccount;
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  console.log("🌍 Using Firebase ENV");
+  console.log("🌍 Firebase ENV loaded");
 } else {
   try {
     serviceAccount = require("./wandaflix-firebase-adminsdk-fbsvc-136831cd7f.json");
-    console.log("💻 Using local Firebase file");
+    console.log("💻 Firebase local file loaded");
   } catch (e) {
     console.error("❌ Firebase error:", e.message);
   }
@@ -29,15 +29,15 @@ if (serviceAccount) {
 
 const db = admin.firestore();
 
-// 🔑 PESAPAL KEYS
+// 🔑 PESAPAL CONFIG
 const consumer_key = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
 const consumer_secret = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
 const baseURL = "https://pay.pesapal.com/v3/api";
 
-// 🔔 YOUR IPN ID
-const IPN_ID = "af8de284-55a1-4e81-b00d-da86eb52bdf0";
+// 🔔 REPLACE AFTER REGISTERING
+let IPN_ID = "REPLACE_AFTER_REGISTERING";
 
-// ✅ GET TOKEN
+// 🔑 GET TOKEN
 async function getToken() {
   const response = await axios.post(`${baseURL}/Auth/RequestToken`, {
     consumer_key,
@@ -51,23 +51,56 @@ app.get("/", (req, res) => {
   res.send("🚀 Wandaflix Payment Server Live");
 });
 
+
+// 🔔 REGISTER IPN (RUN THIS ONCE IN BROWSER)
+app.get("/register-ipn", async (req, res) => {
+  try {
+    const token = await getToken();
+
+    const response = await axios.post(
+      `${baseURL}/URLSetup/RegisterIPN`,
+      {
+        url: "https://wandaflix-payment-server.onrender.com/ipn",
+        ipn_notification_type: "GET",
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    console.log("✅ IPN REGISTERED:", response.data);
+    res.json(response.data);
+
+  } catch (error) {
+    console.error("❌ IPN ERROR:", error.response?.data || error.message);
+    res.status(500).send("IPN registration failed");
+  }
+});
+
+
 // 💳 PAYMENT ROUTE
 app.get("/pay", async (req, res) => {
   try {
-    const { plan, userId } = req.query;
+    const plan = (req.query.plan || "").toLowerCase();
+    const userId = req.query.userId;
 
-    if (!plan || !["daily", "weekly", "monthly"].includes(plan)) {
-      return res.status(400).send("Invalid plan");
-    }
+    if (!userId) return res.status(400).send("Missing userId");
 
-    if (!userId) {
-      return res.status(400).send("Missing userId");
-    }
+    let amount = 0;
 
-    let amount;
     if (plan === "daily") amount = 1000;
-    if (plan === "weekly") amount = 5000;
-    if (plan === "monthly") amount = 18000;
+    else if (plan === "weekly") amount = 5000;
+    else if (plan === "monthly") amount = 18000;
+    else return res.status(400).send("Invalid plan");
+
+    // 🔥 SAVE PLAN BEFORE PAYMENT
+    await db.collection("pendingPayments").doc(userId).set({
+      plan,
+      amount,
+      createdAt: new Date().toISOString()
+    });
 
     const token = await getToken();
 
@@ -75,24 +108,12 @@ app.get("/pay", async (req, res) => {
       `${baseURL}/Transactions/SubmitOrderRequest`,
       {
         id: Date.now().toString(),
-
-        // 🔥 LINK USER
         merchant_reference: userId,
-
         currency: "UGX",
-        amount,
+        amount: amount,
         description: `Wandaflix ${plan} subscription`,
-
-        // 🔗 USE YOUR REAL DOMAIN
         callback_url: "https://wandaflix-payment-server.onrender.com/callback",
-
         notification_id: IPN_ID,
-
-        // 🔥 PASS PLAN
-        metadata: {
-          plan: plan,
-        },
-
         billing_address: {
           email_address: "user@email.com",
           phone_number: "0700000000",
@@ -118,22 +139,42 @@ app.get("/pay", async (req, res) => {
   }
 });
 
-// 🔔 IPN (THIS UNLOCKS USERS)
+
+// 🔔 IPN (MAIN LOGIC)
 app.get("/ipn", async (req, res) => {
   console.log("🔥 IPN RECEIVED:", req.query);
 
   try {
-    const { merchant_reference, status } = req.query;
+    const orderTrackingId = req.query.OrderTrackingId;
+    const userId = req.query.OrderMerchantReference;
 
-    if (!merchant_reference) {
-      return res.status(400).send("Missing userId");
-    }
+    if (!userId) return res.status(400).send("Missing userId");
 
-    const userRef = db.collection("users").doc(merchant_reference);
+    const token = await getToken();
 
-    if (status === "COMPLETED") {
+    const statusResponse = await axios.get(
+      `${baseURL}/Transactions/GetTransactionStatus?orderTrackingId=${orderTrackingId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
 
-      const plan = req.query.plan || "daily";
+    const paymentStatus = statusResponse.data.payment_status_description;
+
+    console.log("💰 PAYMENT STATUS:", paymentStatus);
+
+    if (paymentStatus === "Completed") {
+
+      // 🔥 GET PLAN FROM FIRESTORE
+      const paymentDoc = await db.collection("pendingPayments").doc(userId).get();
+
+      let plan = "daily";
+
+      if (paymentDoc.exists) {
+        plan = paymentDoc.data().plan;
+      }
 
       let expiry = new Date();
 
@@ -141,7 +182,7 @@ app.get("/ipn", async (req, res) => {
       if (plan === "weekly") expiry.setDate(expiry.getDate() + 7);
       if (plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
 
-      await userRef.set({
+      await db.collection("users").doc(userId).set({
         subscription: {
           active: true,
           plan: plan,
@@ -151,31 +192,24 @@ app.get("/ipn", async (req, res) => {
         unlockedMovies: true,
       }, { merge: true });
 
-      console.log(`✅ ${merchant_reference} unlocked (${plan})`);
-
-    } else {
-      await userRef.set({
-        subscription: {
-          active: false,
-        },
-      }, { merge: true });
-
-      console.log(`❌ Payment failed for ${merchant_reference}`);
+      console.log(`✅ ${userId} unlocked (${plan})`);
     }
 
     res.send("IPN processed");
 
   } catch (err) {
-    console.error("❌ IPN ERROR:", err);
+    console.error("❌ IPN ERROR:", err.response?.data || err.message);
     res.status(500).send("IPN error");
   }
 });
 
+
 // 🔁 CALLBACK
 app.get("/callback", (req, res) => {
   console.log("Callback:", req.query);
-  res.send("✅ Payment complete. Return to Wandaflix.");
+  res.send("✅ Payment complete. Return to app.");
 });
+
 
 // 🚀 START SERVER
 app.listen(PORT, () => {

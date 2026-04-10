@@ -5,6 +5,8 @@ const admin = require("firebase-admin");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
 // 🔐 FIREBASE SETUP
 let serviceAccount;
 
@@ -30,11 +32,11 @@ if (serviceAccount) {
 const db = admin.firestore();
 
 // 🔑 PESAPAL CONFIG
-const consumer_key = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
-const consumer_secret = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
+const consumer_key = "YOUR_CONSUMER_KEY";
+const consumer_secret = "YOUR_CONSUMER_SECRET";
 const baseURL = "https://pay.pesapal.com/v3/api";
 
-// 🔔 YOUR REAL IPN ID (ALREADY SET ✅)
+// 🔑 IPN ID
 const IPN_ID = "6608a16d-e037-401a-ab56-da8551e1e515";
 
 // 🔑 GET TOKEN
@@ -48,11 +50,13 @@ async function getToken() {
 
 // 🏠 HOME
 app.get("/", (req, res) => {
-  res.send("🚀 Wandaflix Payment Server Live");
+  res.send("🚀 Wandaflix Payment Server Running");
 });
 
 
-// 💳 PAYMENT ROUTE
+// ==============================
+// 💳 START PAYMENT
+// ==============================
 app.get("/pay", async (req, res) => {
   try {
     const plan = (req.query.plan || "").toLowerCase();
@@ -67,10 +71,12 @@ app.get("/pay", async (req, res) => {
     else if (plan === "monthly") amount = 18000;
     else return res.status(400).send("Invalid plan");
 
-    // 🔥 SAVE PLAN BEFORE PAYMENT
+    // 🔥 STORE PENDING PAYMENT (IMPORTANT FIX)
     await db.collection("pendingPayments").doc(userId).set({
+      userId,
       plan,
       amount,
+      status: "PENDING",
       createdAt: new Date().toISOString()
     });
 
@@ -112,7 +118,9 @@ app.get("/pay", async (req, res) => {
 });
 
 
-// 🔔 IPN (FINAL WORKING VERSION)
+// ==============================
+// 🔥 IPN (MAIN FIX HERE)
+// ==============================
 app.get("/ipn", async (req, res) => {
   console.log("🔥 IPN RECEIVED:", req.query);
 
@@ -137,9 +145,12 @@ app.get("/ipn", async (req, res) => {
 
     console.log("💰 PAYMENT STATUS:", paymentStatus);
 
+    // ==============================
+    // ✅ PAYMENT SUCCESS
+    // ==============================
     if (paymentStatus === "Completed") {
 
-      // 🔥 GET PLAN FROM FIRESTORE
+      // 🔥 GET PLAN FROM pendingPayments
       const paymentDoc = await db.collection("pendingPayments").doc(userId).get();
 
       let plan = "daily";
@@ -148,23 +159,32 @@ app.get("/ipn", async (req, res) => {
         plan = paymentDoc.data().plan;
       }
 
+      const now = new Date();
       let expiry = new Date();
 
       if (plan === "daily") expiry.setDate(expiry.getDate() + 1);
       if (plan === "weekly") expiry.setDate(expiry.getDate() + 7);
       if (plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
 
+      // 🔥 UPDATE USER (THIS FIXES YOUR PROBLEM)
       await db.collection("users").doc(userId).set({
+        isSubscribed: true,
         subscription: {
           active: true,
           plan: plan,
-          startDate: new Date().toISOString(),
-          expiryDate: expiry.toISOString(),
+          startDate: now.toISOString(),
+          expiryDate: expiry.toISOString()
         },
-        unlockedMovies: true,
+        unlockedMovies: true
       }, { merge: true });
 
-      console.log(`✅ ${userId} unlocked (${plan})`);
+      console.log(`✅ USER UNLOCKED: ${userId}`);
+
+      // 🧹 CLEAN pending payment
+      await db.collection("pendingPayments").doc(userId).delete()
+        .catch(() => {});
+
+      console.log("🧹 Pending payment cleared");
     }
 
     res.send("IPN processed");
@@ -176,7 +196,9 @@ app.get("/ipn", async (req, res) => {
 });
 
 
+// ==============================
 // 🔁 CALLBACK
+// ==============================
 app.get("/callback", (req, res) => {
   console.log("Callback:", req.query);
   res.send("✅ Payment complete. Return to app.");

@@ -33,7 +33,7 @@ const db = admin.firestore();
 
 // 🔑 PESAPAL CONFIG
 const consumer_key = CjmavNhVjPUfzdByvopgp0iWy81L75MM;
-const consumer_secret = jTjD/OOj77qJZJrqqFx8HGfzhLM=;
+const consumer_secret = jTjD/OOj77qJZJrqqFx8HGfzhLM=
 const baseURL = "https://pay.pesapal.com/v3/api";
 
 // 🔑 IPN ID

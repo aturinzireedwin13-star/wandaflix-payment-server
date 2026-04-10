@@ -17,30 +17,26 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   console.log("🌍 Firebase ENV loaded");
 } else {
   try {
-    serviceAccount = require("./wandaflix-firebase-adminsdk-fbsvc-136831cd7f.json");
+    serviceAccount = require("./wandaflix-firebase-adminsdk.json");
     console.log("💻 Firebase local file loaded");
   } catch (e) {
     console.error("❌ Firebase error:", e.message);
+    process.exit(1);
   }
 }
 
-if (serviceAccount) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-  console.log("✅ Firebase initialized");
-}
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const db = admin.firestore();
 
 /* =========================
-   🔑 PESAPAL CONFIG (FIXED)
+   🔑 PESAPAL CONFIG
 ========================= */
 const consumer_key = "CjmavNhVjPUfzdByvopgp0iWy81L75MM";
 const consumer_secret = "jTjD/OOj77qJZJrqqFx8HGfzhLM=";
 const baseURL = "https://pay.pesapal.com/v3/api";
-
-// 🔑 IPN ID
 const IPN_ID = "6608a16d-e037-401a-ab56-da8551e1e515";
 
 /* =========================
@@ -67,24 +63,27 @@ app.get("/", (req, res) => {
 app.get("/pay", async (req, res) => {
   try {
     const plan = (req.query.plan || "").toLowerCase();
-    const userId = req.query.userId;
+    const uid = req.query.uid;
+    const email = req.query.email;
 
-    if (!userId) return res.status(400).send("Missing userId");
+    if (!uid || !email) {
+      return res.status(400).send("Missing uid or email");
+    }
 
     let amount = 0;
-
     if (plan === "daily") amount = 1000;
     else if (plan === "weekly") amount = 5000;
     else if (plan === "monthly") amount = 18000;
     else return res.status(400).send("Invalid plan");
 
     // 🔥 SAVE PENDING PAYMENT
-    await db.collection("pendingPayments").doc(userId).set({
-      userId,
+    await db.collection("pendingPayments").doc(uid).set({
+      uid,
+      email,
       plan,
       amount,
       status: "PENDING",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     });
 
     const token = await getToken();
@@ -93,14 +92,14 @@ app.get("/pay", async (req, res) => {
       `${baseURL}/Transactions/SubmitOrderRequest`,
       {
         id: Date.now().toString(),
-        merchant_reference: userId,
+        merchant_reference: uid,
         currency: "UGX",
-        amount: amount,
+        amount,
         description: `Wandaflix ${plan} subscription`,
         callback_url: "https://wandaflix-payment-server.onrender.com/callback",
         notification_id: IPN_ID,
         billing_address: {
-          email_address: "user@email.com",
+          email_address: email, // ✅ dynamic email
           phone_number: "0700000000",
           country_code: "UG",
           first_name: "Wanda",
@@ -132,9 +131,9 @@ app.get("/ipn", async (req, res) => {
 
   try {
     const orderTrackingId = req.query.OrderTrackingId;
-    const userId = req.query.OrderMerchantReference;
+    const uid = req.query.OrderMerchantReference;
 
-    if (!userId) return res.status(400).send("Missing userId");
+    if (!uid) return res.status(400).send("Missing uid");
 
     const token = await getToken();
 
@@ -148,17 +147,18 @@ app.get("/ipn", async (req, res) => {
     );
 
     const paymentStatus = statusResponse.data.payment_status_description;
-
     console.log("💰 PAYMENT STATUS:", paymentStatus);
 
     if (paymentStatus === "Completed") {
 
-      const paymentDoc = await db.collection("pendingPayments").doc(userId).get();
+      const paymentDoc = await db.collection("pendingPayments").doc(uid).get();
 
       let plan = "daily";
+      let email = "";
 
       if (paymentDoc.exists) {
         plan = paymentDoc.data().plan;
+        email = paymentDoc.data().email;
       }
 
       const now = new Date();
@@ -168,25 +168,32 @@ app.get("/ipn", async (req, res) => {
       if (plan === "weekly") expiry.setDate(expiry.getDate() + 7);
       if (plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
 
-      // 🔥 UPDATE USER (FIXED LOGIC)
-      await db.collection("users").doc(userId).set({
+      const subscriptionData = {
+        uid,
+        email,
+        isPremium: true,
+        plan,
+        startDate: now.toISOString(),
+        expiryDate: expiry.toISOString(),
+      };
+
+      // ✅ MAIN SOURCE
+      await db.collection("subscriptions").doc(uid).set(subscriptionData);
+
+      // ✅ APP SIDE
+      await db.collection("users").doc(uid).set({
+        uid,
+        email,
         isSubscribed: true,
-        subscription: {
-          active: true,
-          plan: plan,
-          startDate: now.toISOString(),
-          expiryDate: expiry.toISOString()
-        },
-        unlockedMovies: true
+        unlockedMovies: true,
+        subscription: subscriptionData,
       }, { merge: true });
 
-      console.log(`✅ USER UNLOCKED: ${userId}`);
+      console.log(`✅ USER UNLOCKED: ${uid}`);
 
-      // 🧹 CLEAN PENDING PAYMENT
-      await db.collection("pendingPayments").doc(userId).delete()
-        .catch(() => {});
+      // 🧹 CLEAN UP
+      await db.collection("pendingPayments").doc(uid).delete().catch(() => {});
 
-      console.log("🧹 Pending payment cleared");
     }
 
     res.send("IPN processed");
@@ -211,3 +218,6 @@ app.get("/callback", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+```
+
+---

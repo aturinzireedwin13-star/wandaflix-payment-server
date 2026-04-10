@@ -32,8 +32,8 @@ if (serviceAccount) {
 const db = admin.firestore();
 
 // 🔑 PESAPAL CONFIG
-const consumer_key = "YOUR_CONSUMER_KEY";
-const consumer_secret = "YOUR_CONSUMER_SECRET";
+const consumer_key = CjmavNhVjPUfzdByvopgp0iWy81L75MM;
+const consumer_secret = jTjD/OOj77qJZJrqqFx8HGfzhLM=;
 const baseURL = "https://pay.pesapal.com/v3/api";
 
 // 🔑 IPN ID

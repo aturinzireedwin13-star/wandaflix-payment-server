@@ -66,6 +66,8 @@ app.get("/pay", async (req, res) => {
     const uid = req.query.uid;
     const email = req.query.email;
 
+    console.log("🔥 PAY REQUEST:", req.query);
+
     if (!uid || !email) {
       return res.status(400).send("Missing uid or email");
     }
@@ -88,19 +90,23 @@ app.get("/pay", async (req, res) => {
 
     const token = await getToken();
 
+    const orderId = `WANDA_${uid}_${Date.now()}`;
+
     const response = await axios.post(
       `${baseURL}/Transactions/SubmitOrderRequest`,
       {
-        id: Date.now().toString(),
-        merchant_reference: uid,
+        id: orderId,
         currency: "UGX",
         amount,
         description: `Wandaflix ${plan} subscription`,
         callback_url: "https://wandaflix-payment-server.onrender.com/callback",
         notification_id: IPN_ID,
+        merchant_reference: uid,
+        redirect_mode: "TOP_WINDOW",
+
         billing_address: {
-          email_address: email, // ✅ dynamic email
-          phone_number: "0700000000",
+          email_address: email,
+          phone_number: "256700000000",
           country_code: "UG",
           first_name: "Wanda",
           last_name: "User",
@@ -109,17 +115,20 @@ app.get("/pay", async (req, res) => {
       {
         headers: {
           Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
       }
     );
+
+    console.log("✅ Pesapal Response:", response.data);
 
     res.json({
       redirect_url: response.data.redirect_url,
     });
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
-    res.status(500).send("Payment error");
+    console.error("❌ PAYMENT ERROR FULL:", err.response?.data || err.message);
+    res.status(500).send(err.response?.data || "Payment error");
   }
 });
 
@@ -180,7 +189,7 @@ app.get("/ipn", async (req, res) => {
       // ✅ MAIN SOURCE
       await db.collection("subscriptions").doc(uid).set(subscriptionData);
 
-      // ✅ APP SIDE
+      // ✅ USER DOC
       await db.collection("users").doc(uid).set({
         uid,
         email,
@@ -191,9 +200,8 @@ app.get("/ipn", async (req, res) => {
 
       console.log(`✅ USER UNLOCKED: ${uid}`);
 
-      // 🧹 CLEAN UP
+      // 🧹 CLEAN
       await db.collection("pendingPayments").doc(uid).delete().catch(() => {});
-
     }
 
     res.send("IPN processed");

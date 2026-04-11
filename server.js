@@ -78,7 +78,7 @@ app.get("/pay", async (req, res) => {
     else if (plan === "monthly") amount = 18000;
     else return res.status(400).send("Invalid plan");
 
-    // 🔥 SAVE PENDING PAYMENT
+    // SAVE PENDING PAYMENT
     await db.collection("pendingPayments").doc(uid).set({
       uid,
       email,
@@ -103,7 +103,6 @@ app.get("/pay", async (req, res) => {
         notification_id: IPN_ID,
         merchant_reference: uid,
         redirect_mode: "TOP_WINDOW",
-
         billing_address: {
           email_address: email,
           phone_number: "256700000000",
@@ -127,22 +126,32 @@ app.get("/pay", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR FULL:", err.response?.data || err.message);
+    console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
     res.status(500).send(err.response?.data || "Payment error");
   }
 });
 
 /* =========================
-   🔥 IPN (UNLOCK SYSTEM)
+   🔥 IPN (FIXED COMPLETELY)
 ========================= */
 app.get("/ipn", async (req, res) => {
   console.log("🔥 IPN RECEIVED:", req.query);
 
   try {
     const orderTrackingId = req.query.OrderTrackingId;
-    const uid = req.query.OrderMerchantReference;
+    let uid = req.query.OrderMerchantReference;
 
     if (!uid) return res.status(400).send("Missing uid");
+
+    // 🔥 FIX UID (CRITICAL)
+    if (uid.startsWith("WANDA_")) {
+      const parts = uid.split("_");
+      if (parts.length >= 2) {
+        uid = parts[1]; // real Firebase UID
+      }
+    }
+
+    console.log("✅ FINAL UID:", uid);
 
     const token = await getToken();
 
@@ -167,7 +176,15 @@ app.get("/ipn", async (req, res) => {
 
       if (paymentDoc.exists) {
         plan = paymentDoc.data().plan;
-        email = paymentDoc.data().email;
+        email = paymentDoc.data().email || "";
+      }
+
+      // 🔥 EMAIL FALLBACK (VERY IMPORTANT)
+      if (!email) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (userDoc.exists) {
+          email = userDoc.data().email || "";
+        }
       }
 
       const now = new Date();
@@ -186,10 +203,9 @@ app.get("/ipn", async (req, res) => {
         expiryDate: expiry.toISOString(),
       };
 
-      // ✅ MAIN SOURCE
+      // ✅ SAVE CORRECTLY
       await db.collection("subscriptions").doc(uid).set(subscriptionData);
 
-      // ✅ USER DOC
       await db.collection("users").doc(uid).set({
         uid,
         email,
@@ -198,9 +214,8 @@ app.get("/ipn", async (req, res) => {
         subscription: subscriptionData,
       }, { merge: true });
 
-      console.log(`✅ USER UNLOCKED: ${uid}`);
+      console.log("✅ USER UNLOCKED:", uid);
 
-      // 🧹 CLEAN
       await db.collection("pendingPayments").doc(uid).delete().catch(() => {});
     }
 
@@ -216,7 +231,6 @@ app.get("/ipn", async (req, res) => {
    🔁 CALLBACK
 ========================= */
 app.get("/callback", (req, res) => {
-  console.log("Callback:", req.query);
   res.send("✅ Payment complete. Return to app.");
 });
 

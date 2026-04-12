@@ -58,6 +58,56 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
+   🔍 CHECK SUBSCRIPTION (NEW)
+========================= */
+app.get("/check-subscription", async (req, res) => {
+  try {
+    const uid = req.query.uid;
+
+    if (!uid) return res.status(400).send("Missing uid");
+
+    const userDoc = await db.collection("users").doc(uid).get();
+
+    if (!userDoc.exists) {
+      return res.json({ isPremium: false });
+    }
+
+    const userData = userDoc.data();
+    const subscription = userData.subscription;
+
+    if (!subscription) {
+      return res.json({ isPremium: false });
+    }
+
+    const now = new Date();
+    const expiry = new Date(subscription.expiryDate);
+
+    // 🔥 CHECK EXPIRY
+    if (expiry <= now) {
+      console.log("⛔ Subscription expired:", uid);
+
+      // AUTO LOCK USER
+      await db.collection("users").doc(uid).update({
+        isSubscribed: false,
+        unlockedMovies: false,
+      });
+
+      return res.json({ isPremium: false });
+    }
+
+    return res.json({
+      isPremium: true,
+      expiryDate: subscription.expiryDate,
+      plan: subscription.plan,
+    });
+
+  } catch (err) {
+    console.error("❌ CHECK ERROR:", err.message);
+    res.status(500).send("Error checking subscription");
+  }
+});
+
+/* =========================
    💳 START PAYMENT
 ========================= */
 app.get("/pay", async (req, res) => {
@@ -65,8 +115,6 @@ app.get("/pay", async (req, res) => {
     const plan = (req.query.plan || "").toLowerCase();
     const uid = req.query.uid;
     const email = req.query.email;
-
-    console.log("🔥 PAY REQUEST:", req.query);
 
     if (!uid || !email) {
       return res.status(400).send("Missing uid or email");
@@ -78,7 +126,6 @@ app.get("/pay", async (req, res) => {
     else if (plan === "monthly") amount = 18000;
     else return res.status(400).send("Invalid plan");
 
-    // SAVE PENDING PAYMENT
     await db.collection("pendingPayments").doc(uid).set({
       uid,
       email,
@@ -89,7 +136,6 @@ app.get("/pay", async (req, res) => {
     });
 
     const token = await getToken();
-
     const orderId = `WANDA_${uid}_${Date.now()}`;
 
     const response = await axios.post(
@@ -119,8 +165,6 @@ app.get("/pay", async (req, res) => {
       }
     );
 
-    console.log("✅ Pesapal Response:", response.data);
-
     res.json({
       redirect_url: response.data.redirect_url,
     });
@@ -132,7 +176,7 @@ app.get("/pay", async (req, res) => {
 });
 
 /* =========================
-   🔥 IPN (FIXED COMPLETELY)
+   🔥 IPN (PAYMENT SUCCESS)
 ========================= */
 app.get("/ipn", async (req, res) => {
   console.log("🔥 IPN RECEIVED:", req.query);
@@ -143,15 +187,10 @@ app.get("/ipn", async (req, res) => {
 
     if (!uid) return res.status(400).send("Missing uid");
 
-    // 🔥 FIX UID (CRITICAL)
     if (uid.startsWith("WANDA_")) {
       const parts = uid.split("_");
-      if (parts.length >= 2) {
-        uid = parts[1]; // real Firebase UID
-      }
+      uid = parts[1];
     }
-
-    console.log("✅ FINAL UID:", uid);
 
     const token = await getToken();
 
@@ -165,7 +204,6 @@ app.get("/ipn", async (req, res) => {
     );
 
     const paymentStatus = statusResponse.data.payment_status_description;
-    console.log("💰 PAYMENT STATUS:", paymentStatus);
 
     if (paymentStatus === "Completed") {
 
@@ -177,14 +215,6 @@ app.get("/ipn", async (req, res) => {
       if (paymentDoc.exists) {
         plan = paymentDoc.data().plan;
         email = paymentDoc.data().email || "";
-      }
-
-      // 🔥 EMAIL FALLBACK (VERY IMPORTANT)
-      if (!email) {
-        const userDoc = await db.collection("users").doc(uid).get();
-        if (userDoc.exists) {
-          email = userDoc.data().email || "";
-        }
       }
 
       const now = new Date();
@@ -203,7 +233,6 @@ app.get("/ipn", async (req, res) => {
         expiryDate: expiry.toISOString(),
       };
 
-      // ✅ SAVE CORRECTLY
       await db.collection("subscriptions").doc(uid).set(subscriptionData);
 
       await db.collection("users").doc(uid).set({

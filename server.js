@@ -46,6 +46,27 @@ async function getToken() {
 }
 
 /* =========================
+   🔗 ANDROID APP LINKS FIX
+   (THIS IS WHAT GOOGLE NEEDS)
+========================= */
+app.get("/.well-known/assetlinks.json", (req, res) => {
+  res.setHeader("Content-Type", "application/json");
+
+  res.status(200).send([
+    {
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: {
+        namespace: "android_app",
+        package_name: "com.wandaflix.app",
+        sha256_cert_fingerprints: [
+          "42:3C:D4:44:B9:89:71:0E:FB:6D:FE:77:FE:5D:80:2F:97:82:11:72:27:74:F5:4C:E9:51:D9:82:EF:B1:2F:6D"
+        ]
+      }
+    }
+  ]);
+});
+
+/* =========================
    🏠 HOME
 ========================= */
 app.get("/", (req, res) => {
@@ -53,7 +74,7 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   ✅ CHECK SUBSCRIPTION (CRITICAL)
+   ✅ CHECK SUBSCRIPTION
 ========================= */
 app.get("/check-subscription", async (req, res) => {
   try {
@@ -74,7 +95,6 @@ app.get("/check-subscription", async (req, res) => {
     const now = new Date();
     const expiry = new Date(data.expiryDate);
 
-    // 🔥 AUTO EXPIRE
     if (expiry < now) {
       await db.collection("subscriptions").doc(uid).set({
         ...data,
@@ -132,7 +152,6 @@ app.get("/pay", async (req, res) => {
     });
 
     const token = await getToken();
-
     const orderId = `WANDA_${uid}_${Date.now()}`;
 
     const response = await axios.post(
@@ -182,7 +201,6 @@ app.get("/ipn", async (req, res) => {
 
     if (!merchantRef) return res.send("Missing reference");
 
-    // 🔥 Extract UID
     let uid = merchantRef;
     if (merchantRef.startsWith("WANDA_")) {
       const parts = merchantRef.split("_");
@@ -201,7 +219,6 @@ app.get("/ipn", async (req, res) => {
     const status = statusResponse.data.payment_status_description;
 
     if (status === "Completed") {
-
       const paymentDoc = await db.collection("pendingPayments").doc(uid).get();
 
       let plan = "daily";

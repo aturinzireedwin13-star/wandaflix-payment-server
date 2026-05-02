@@ -137,9 +137,9 @@ app.get("/pay", async (req, res) => {
     }
 
     let amount = 0;
-    if (plan === "daily") amount = 1000;
-    else if (plan === "weekly") amount = 5000;
-    else if (plan === "monthly") amount = 18000;
+    if (plan === "daily") amount = 2000;
+    else if (plan === "weekly") amount = 9500;
+    else if (plan === "monthly") amount = 30000;
     else return res.status(400).send("Invalid plan");
 
     await db.collection("pendingPayments").doc(uid).set({
